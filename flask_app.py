@@ -3,10 +3,16 @@ from flask import Flask, request, jsonify
 from PIL import Image
 import io
 import sys
-# 🔥 سنستخدم مكتبة TensorFlow Lite (لتوفير الذاكرة)
-import tensorflow.lite as tflite 
-from tensorflow.lite.python.interpreter import Interpreter # لاستخدام مفسر TFLite
 
+# 🔥🔥 استيراد TFLite Interpreter (المحرك الخفيف) 🔥🔥
+# بما أننا لا نستطيع تحميل TensorFlow الضخم، نعتمد على TFLite Interpreter
+try:
+    import tensorflow.lite as tflite
+    Interpreter = tflite.Interpreter
+except ImportError:
+    print("FATAL ERROR: Could not find TFLite Interpreter.")
+    sys.exit(1)
+    
 app = Flask(__name__)
 
 # ----------------------------------------------
@@ -15,18 +21,20 @@ app = Flask(__name__)
 MODEL_PATH = 'API_DEPLOYMENT_TFLITE_FINAL.tflite' 
 IMAGE_SIZE = (416, 416)
 CLASS_NAMES = [
-    'Corroded battery Terminals', 'Oil Leak', 'Low tire pressure', 
-    'Healthy Battery', 'Healthy Engine', 'Healthy Tire'
+    'Corroded battery Terminals', 
+    'Oil Leak', 
+    'Low tire pressure', 
+    'Healthy Battery', 
+    'Healthy Engine', 
+    'Healthy Tire'
 ] 
 
 # 2. تحميل المفسر (Interpreter)
 try:
-    # تحميل المفسر (Interpreter) الذي يستهلك ذاكرة أقل
     interpreter = Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
-    print("✅ TFLite Model Interpreter loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Could not load TFLite model: {e}")
     sys.exit(1)
@@ -36,7 +44,6 @@ except Exception as e:
 # 3. وظيفة معالجة الصورة
 # ----------------------------------------------
 def preprocess_image(image_file_bytes):
-    """Loads image bytes, resizes, and prepares it for TFLite model."""
     image = Image.open(io.BytesIO(image_file_bytes)).convert('RGB')
     image = image.resize(IMAGE_SIZE)
     input_data = np.asarray(image, dtype=np.float32)
@@ -65,19 +72,16 @@ def predict():
         predictions = output_tensor[0]
         
         predicted_index = np.argmax(predictions)
+        
+        # 🔥 الحل الحاسم: تحويل NumPy Float إلى float قياسي
+        confidence_score = float(np.max(predictions)) 
         predicted_class = CLASS_NAMES[predicted_index]
-        confidence_score = float(np.max(predictions)) # تحويل إلى float قياسي
 
         return jsonify({
             'success': True,
-            'fault_class': predicted_class, 
+            'fault_class': predicted_class,
             'confidence': confidence_score
         })
         
     except Exception as e:
         return jsonify({'success': False, 'message': f'Prediction processing failed: {str(e)}'}), 500
-
-# ----------------------------------------------
-# 5. تشغيل التطبيق
-# ----------------------------------------------
-# (يجب أن يتم تشغيل هذا عبر Gunicorn على Render)
