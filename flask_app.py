@@ -1,24 +1,17 @@
-import numpy as np
+import tensorflow as tf
 from flask import Flask, request, jsonify
 from PIL import Image
+import numpy as np
 import io
 import sys
+import os
 
-# 🔥🔥 استيراد TFLite Interpreter (المحرك الخفيف) 🔥🔥
-# بما أننا لا نستطيع تحميل TensorFlow الضخم، نعتمد على TFLite Interpreter
-try:
-    import tensorflow.lite as tflite
-    Interpreter = tflite.Interpreter
-except ImportError:
-    print("FATAL ERROR: Could not find TFLite Interpreter.")
-    sys.exit(1)
-    
 app = Flask(__name__)
 
 # ----------------------------------------------
 # 1. SETUP AND CONSTANTS
 # ----------------------------------------------
-MODEL_PATH = 'API_DEPLOYMENT_TFLITE_FINAL.tflite' 
+MODEL_PATH = 'FINAL_API_MODEL.h5' 
 IMAGE_SIZE = (416, 416)
 CLASS_NAMES = [
     'Corroded battery Terminals', 
@@ -29,14 +22,14 @@ CLASS_NAMES = [
     'Healthy Tire'
 ] 
 
-# 2. تحميل المفسر (Interpreter)
+# 2. تحميل النموذج (يتم مرة واحدة عند بدء تشغيل السيرفر)
 try:
-    interpreter = Interpreter(model_path=MODEL_PATH)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+    # 🔥 نعتمد على تحميل TensorFlow الكامل هنا (لأنه الخيار الوحيد الذي يشغل النموذج)
+    MODEL = tf.keras.models.load_model(MODEL_PATH)
+    print("✅ TensorFlow Model loaded successfully.")
 except Exception as e:
-    print(f"FATAL ERROR: Could not load TFLite model: {e}")
+    print(f"FATAL ERROR: Could not load Keras model: {e}")
+    # هذا الإجراء يوقف السيرفر فوراً إذا فشل تحميل TensorFlow
     sys.exit(1)
 
 
@@ -44,12 +37,19 @@ except Exception as e:
 # 3. وظيفة معالجة الصورة
 # ----------------------------------------------
 def preprocess_image(image_file_bytes):
+    """Loads image bytes, resizes, and prepares it for the model."""
+    if MODEL is None:
+        return None
+        
     image = Image.open(io.BytesIO(image_file_bytes)).convert('RGB')
     image = image.resize(IMAGE_SIZE)
-    input_data = np.asarray(image, dtype=np.float32)
-    input_data = input_data / 255.0
-    input_data = np.expand_dims(input_data, axis=0)
-    return input_data
+    
+    # تحويل إلى مصفوفة وتطبيع (Normalization)
+    image_array = np.asarray(image, dtype=np.float32)
+    image_array = image_array / 255.0
+    
+    # إضافة بعد الدُفعة (Batch dimension)
+    return np.expand_dims(image_array, axis=0)
 
 # ----------------------------------------------
 # 4. نقطة النهاية للذكاء الاصطناعي (API Endpoint)
@@ -63,23 +63,17 @@ def predict():
         image_file = request.files['image'].read()
         processed_image = preprocess_image(image_file)
         
-        # 💡 تشغيل المفسر (Running the TFLite Interpreter)
-        interpreter.set_tensor(input_details[0]['index'], processed_image)
-        interpreter.invoke()
-        
-        # الحصول على النتيجة
-        output_tensor = interpreter.get_tensor(output_details[0]['index'])
-        predictions = output_tensor[0]
+        # إجراء التنبؤ
+        predictions = MODEL.predict(processed_image, verbose=0)[0]
         
         predicted_index = np.argmax(predictions)
-        
-        # 🔥 الحل الحاسم: تحويل NumPy Float إلى float قياسي
-        confidence_score = float(np.max(predictions)) 
         predicted_class = CLASS_NAMES[predicted_index]
+        confidence_score = float(np.max(predictions))
 
+        # 💡 الرد الذي سيذهب لتطبيق الأندرويد
         return jsonify({
             'success': True,
-            'fault_class': predicted_class,
+            'fault_class': predicted_class, # هذا هو المفتاح الذي يبحث عنه الـ DB
             'confidence': confidence_score
         })
         
