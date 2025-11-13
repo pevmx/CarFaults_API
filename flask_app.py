@@ -4,7 +4,6 @@ from PIL import Image
 import numpy as np
 import io
 import sys
-import os
 
 app = Flask(__name__)
 
@@ -22,19 +21,16 @@ CLASS_NAMES = [
     'Healthy Tire'
 ] 
 
-# 2. تحميل النموذج (يتم مرة واحدة عند بدء تشغيل السيرفر)
+# تحميل النموذج (يتم مرة واحدة عند بدء تشغيل السيرفر)
 try:
-    # 🔥 نعتمد على تحميل TensorFlow الكامل هنا (لأنه الخيار الوحيد الذي يشغل النموذج)
+    # 🔥 نعتمد على تحميل TensorFlow الكامل هنا
     MODEL = tf.keras.models.load_model(MODEL_PATH)
-    print("✅ TensorFlow Model loaded successfully.")
 except Exception as e:
-    print(f"FATAL ERROR: Could not load Keras model: {e}")
-    # هذا الإجراء يوقف السيرفر فوراً إذا فشل تحميل TensorFlow
+    # إيقاف السيرفر إذا فشل تحميل النموذج
     sys.exit(1)
 
-
 # ----------------------------------------------
-# 3. وظيفة معالجة الصورة
+# 2. وظيفة معالجة الصورة
 # ----------------------------------------------
 def preprocess_image(image_file_bytes):
     """Loads image bytes, resizes, and prepares it for the model."""
@@ -43,16 +39,12 @@ def preprocess_image(image_file_bytes):
         
     image = Image.open(io.BytesIO(image_file_bytes)).convert('RGB')
     image = image.resize(IMAGE_SIZE)
-    
-    # تحويل إلى مصفوفة وتطبيع (Normalization)
     image_array = np.asarray(image, dtype=np.float32)
     image_array = image_array / 255.0
-    
-    # إضافة بعد الدُفعة (Batch dimension)
     return np.expand_dims(image_array, axis=0)
 
 # ----------------------------------------------
-# 4. نقطة النهاية للذكاء الاصطناعي (API Endpoint)
+# 3. نقطة النهاية للذكاء الاصطناعي (API Endpoint)
 # ----------------------------------------------
 @app.route('/predict_fault', methods=['POST'])
 def predict():
@@ -63,17 +55,22 @@ def predict():
         image_file = request.files['image'].read()
         processed_image = preprocess_image(image_file)
         
-        # إجراء التنبؤ
         predictions = MODEL.predict(processed_image, verbose=0)[0]
-        
         predicted_index = np.argmax(predictions)
         predicted_class = CLASS_NAMES[predicted_index]
         confidence_score = float(np.max(predictions))
+        
+        # 💡 فحص الثقة للتأكد من جودة الصورة 
+        if confidence_score < 0.6:
+            return jsonify({
+                "success": False,
+                "message": "Confidence threshold not met. Please recapture the image.",
+                "confidence": confidence_score
+            }), 400
 
-        # 💡 الرد الذي سيذهب لتطبيق الأندرويد
         return jsonify({
             'success': True,
-            'fault_class': predicted_class, # هذا هو المفتاح الذي يبحث عنه الـ DB
+            'fault_class': predicted_class, 
             'confidence': confidence_score
         })
         
