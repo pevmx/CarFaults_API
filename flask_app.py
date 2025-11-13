@@ -1,55 +1,85 @@
-from flask import Flask, request, jsonify
-import tensorflow as tf
 import numpy as np
+from flask import Flask, request, jsonify
 from PIL import Image
 import io
+import tensorflow as tf # Required for loading the model structure
 
 app = Flask(__name__)
 
+# ----------------------------------------------
+# 1. SETUP AND CONSTANTS
+# ----------------------------------------------
+MODEL_PATH = 'FINAL_API_MODEL.h5' 
+IMAGE_SIZE = (416, 416)
+CLASS_NAMES = [
+    'Corroded battery Terminals', 
+    'Oil Leak', 
+    'Low tire pressure', 
+    'Healthy Battery', 
+    'Healthy Engine', 
+    'Healthy Tire'
+] 
 
-MODEL_PATH = "FINAL_API_MODEL.h5"
+# 2. تحميل النموذج
+try:
+    # 💡 نقوم بتحميل النموذج مرة واحدة
+    MODEL = tf.keras.models.load_model(MODEL_PATH)
+except Exception as e:
+    # هذا الخطأ هو سبب المشاكل السابقة، ويجب التعامل معه هنا
+    print(f"FATAL ERROR: Could not load Keras model: {e}")
+    # إذا فشل التحميل، لن نقوم بتشغيل التطبيق
+    MODEL = None
 
+# ----------------------------------------------
+# 3. وظيفة معالجة الصورة
+# ----------------------------------------------
+def preprocess_image(image_file_bytes):
+    if MODEL is None:
+        return None
+        
+    image = Image.open(io.BytesIO(image_file_bytes)).convert('RGB')
+    image = image.resize(IMAGE_SIZE)
+    
+    input_data = np.asarray(image, dtype=np.float32)
+    input_data = input_data / 255.0
+    
+    input_data = np.expand_dims(input_data, axis=0)
+    return input_data
 
-model = tf.keras.models.load_model(MODEL_PATH)
-
-
-CLASSES = ["Corroded battery Terminals", "Healthy Battery", "Healthy Engine", "Healthy Tire","Low tire pressure","Oil Leak"]
-
-def preprocess_image(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    img = img.resize((416, 416))
-    img = np.array(img) / 255.0
-    img = np.expand_dims(img, axis=0)
-    return img
-
-@app.route("/predict", methods=["POST"])
+# ----------------------------------------------
+# 4. نقطة النهاية للذكاء الاصطناعي (API Endpoint)
+# ----------------------------------------------
+@app.route('/predict_fault', methods=['POST'])
 def predict():
-    if "image" not in request.files:
-        return jsonify({"error": "No image sent"}), 400
+    if MODEL is None:
+        return jsonify({'success': False, 'message': 'AI Model is not loaded on the server.'}), 500
+        
+    if 'image' not in request.files:
+        return jsonify({'success': False, 'message': 'No image file provided in the request'}), 400
+    
+    try:
+        image_file = request.files['image'].read()
+        processed_image = preprocess_image(image_file)
+        
+        # إجراء التنبؤ
+        predictions = MODEL.predict(processed_image, verbose=0)[0]
+        predicted_index = np.argmax(predictions)
+        
+        # 🔥🔥 الحل الحاسم: التحويل إلى float قياسي قبل الإرسال 🔥🔥
+        confidence_score = float(np.max(predictions)) 
 
-    image_file = request.files["image"]
-    img_bytes = image_file.read()
-
-    img = preprocess_image(img_bytes)
-    predictions = model.predict(img)[0]
-    predicted_index = np.argmax(predictions)
-    confidence = predictions[predicted_index]
-    predicted_class = CLASSES[predicted_index]
-
-    if confidence < 0.6:
+        # 💡 يجب أن يكون الرد JSON فقط (String, int, float)
         return jsonify({
-            "result": "No visible fault detected. Please retake the image.",
-            "confidence": float(confidence)
+            'success': True,
+            'fault_class': CLASS_NAMES[predicted_index],
+            'confidence': confidence_score
         })
+        
+    except Exception as e:
+        # إذا حدث أي خطأ برمجي، نعرضه في السجل
+        return jsonify({'success': False, 'message': f'Prediction processing failed: {str(e)}'}), 500
 
-    return jsonify({
-        "result": f" Detected fault in {predicted_class}",
-        "confidence": float(confidence)
-    })
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"API is running successfully"})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    return jsonify({"status": "AI Server Operational (Waiting for POST on /predict_fault)"})
