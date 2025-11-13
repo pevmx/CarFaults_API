@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 import io
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 
 MODEL_PATH = "FINAL_API_MODEL.h5"
@@ -13,7 +13,7 @@ MODEL_PATH = "FINAL_API_MODEL.h5"
 model = tf.keras.models.load_model(MODEL_PATH)
 
 
-CLASSES = ["Engine", "Brakes", "Suspension", "Transmission"]
+CLASSES = ["Corroded battery Terminals", "Healthy Battery", "Healthy Engine", "Healthy Tire","Low tire pressure","Oil Leak"]
 
 def preprocess_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -38,18 +38,18 @@ def predict():
 
     if confidence < 0.6:
         return jsonify({
-            "result": "Re-capture image with better focus.",
+            "result": "No visible fault detected. Please retake the image.",
             "confidence": float(confidence)
         })
 
     return jsonify({
-        "result": f" Diagnosis successfully confirmed in {predicted_class}",
+        "result": f" Detected fault in {predicted_class}",
         "confidence": float(confidence)
     })
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API is running successfully"
+    return jsonify({"API is running successfully"})
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
