@@ -1,65 +1,55 @@
-import numpy as np
 from flask import Flask, request, jsonify
+import tensorflow as tf
+import numpy as np
 from PIL import Image
 import io
-import tensorflow as tf
 
-app = Flask(__name__)
-
-
-MODEL_PATH = 'FINAL_API_MODEL.h5' 
-IMAGE_SIZE = (416, 416)
-CLASS_NAMES = [
-    'Corroded battery Terminals', 
-    'Oil Leak', 
-    'Low tire pressure', 
-    'Healthy Battery', 
-    'Healthy Engine', 
-    'Healthy Tire'
-] 
+app = Flask(_name_)
 
 
-try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print("✅ Keras/TensorFlow Model loaded successfully.")
-except Exception as e:
-    print(f"FATAL ERROR: Could not load Keras model: {e}")
-
-def preprocess_image(image_file_bytes):
-    """Loads image bytes, resizes, and prepares it for the model."""
-    image = Image.open(io.BytesIO(image_file_bytes)).convert('RGB')
-    image = image.resize(IMAGE_SIZE)
-    
-    input_data = np.asarray(image, dtype=np.float32)
-    input_data = input_data / 255.0
-    
-    input_data = np.expand_dims(input_data, axis=0)
-    return input_data
+MODEL_PATH = "FINAL_API_MODEL.h5"
 
 
-@app.route('/predict_fault', methods=['POST'])
+model = tf.keras.models.load_model(MODEL_PATH)
+
+
+CLASSES = ["Engine", "Brakes", "Suspension", "Transmission"]
+
+def preprocess_image(image_bytes):
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = img.resize((416, 416))
+    img = np.array(img) / 255.0
+    img = np.expand_dims(img, axis=0)
+    return img
+
+@app.route("/predict", methods=["POST"])
 def predict():
-    if 'image' not in request.files:
-        return jsonify({'success': False, 'message': 'No image file provided in the request'}), 400
-    
-    try:
-        image_file = request.files['image'].read()
-        processed_image = preprocess_image(image_file)
-        
-        predictions = model.predict(processed_image, verbose=0)[0]
-        
-        predicted_index = np.argmax(predictions)
-        predicted_class = CLASS_NAMES[predicted_index]
-        confidence_score = float(np.max(predictions))
+    if "image" not in request.files:
+        return jsonify({"error": "No image sent"}), 400
 
+    image_file = request.files["image"]
+    img_bytes = image_file.read()
+
+    img = preprocess_image(img_bytes)
+    predictions = model.predict(img)[0]
+    predicted_index = np.argmax(predictions)
+    confidence = predictions[predicted_index]
+    predicted_class = CLASSES[predicted_index]
+
+    if confidence < 0.6:
         return jsonify({
-            'success': True,
-            'fault_class': predicted_class, 
-            'confidence': confidence_score
+            "result": "Re-capture image with better focus.",
+            "confidence": float(confidence)
         })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Prediction processing failed: {str(e)}'}), 500
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    return jsonify({
+        "result": f" Diagnosis successfully confirmed in {predicted_class}",
+        "confidence": float(confidence)
+    })
+
+@app.route("/", methods=["GET"])
+def home():
+    return "API is running successfully"
+
+if _name_ == "_main_":
+    app.run(host="0.0.0.0", port=5000)
